@@ -67,6 +67,3 @@ face_auth_system/
 └── requirements.txt        # Dependencies
 ```
 
-## License
-
-MIT License 
