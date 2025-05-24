@@ -20,7 +20,7 @@ A secure face authentication system built with Python, OpenCV, and MySQL.
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/Ayush021-Dev/Face_Authenticaion_App.git
 cd face_auth_system
 ```
 
@@ -31,9 +31,9 @@ pip install -r requirements.txt
 
 3. Set up MySQL database:
 ```sql
-CREATE DATABASE face_auth_new;
-CREATE USER 'faceuser'@'localhost' IDENTIFIED BY '1234';
-GRANT ALL PRIVILEGES ON face_auth_new.* TO 'faceuser'@'localhost';
+CREATE DATABASE"NAME";
+CREATE USER 'faceuser'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON NAME.* TO 'faceuser'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
