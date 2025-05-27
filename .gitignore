@@ -35,4 +35,6 @@ ENV/
 # Project specific
 models/
 data/
-*.log 
+*.log
+bina_refinery.csv
+bina_refinery_log.xlsx 
