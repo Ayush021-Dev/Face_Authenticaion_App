@@ -20,7 +20,8 @@ class DatabaseManager:
                 host='localhost',
                 user='faceuser',
                 password='1234',
-                database='face_auth_new'
+                database='face_auth_new',
+                ssl_disabled=True  # Disable SSL to fix connection issues
             )
             
             if self.connection.is_connected():
@@ -46,10 +47,17 @@ class DatabaseManager:
 
     def create_tables(self):
         try:
-            # Drop existing tables to ensure clean migration
-            self.cursor.execute("DROP TABLE IF EXISTS login_logs")
-            self.cursor.execute("DROP TABLE IF EXISTS employees")
-            self.cursor.execute("DROP TABLE IF EXISTS equipment_areas")
+            # Create tables if they don't exist (removed DROP TABLE statements)
+            
+            # Admin table
+            self.cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                admin_id VARCHAR(20) PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
             
             # Equipment areas table
             self.cursor.execute('''
@@ -88,7 +96,7 @@ class DatabaseManager:
             ''')
             
             self.connection.commit()
-            print("Tables created successfully")
+            print("Tables checked/created successfully")
         except Error as err:
             print(f"Error creating tables: {err}")
             raise err
@@ -109,8 +117,8 @@ class DatabaseManager:
                 print(f"Debug - Employee {emp_id} already exists in database")
                 return False
             
-            # Check if equipment area exists
-            if not self.get_equipment_area(equipment_id):
+            # Check if equipment area exists only if equipment_id is provided
+            if equipment_id and not self.get_equipment_area(equipment_id):
                 print(f"Debug - Equipment area {equipment_id} does not exist")
                 return False
             
@@ -283,3 +291,40 @@ class DatabaseManager:
         except mysql.connector.Error as err:
             print(f"Error getting equipment areas: {err}")
             return []
+
+    def verify_admin(self, admin_id, password):
+        try:
+            query = "SELECT admin_id, name FROM admins WHERE admin_id = %s AND password = %s"
+            self.cursor.execute(query, (admin_id, password))
+            result = self.cursor.fetchone()
+            return result is not None
+        except mysql.connector.Error as err:
+            print(f"Error verifying admin: {err}")
+            return False
+
+    def add_admin(self, admin_id, name, password):
+        try:
+            # Check if admin already exists
+            check_query = "SELECT admin_id FROM admins WHERE admin_id = %s"
+            self.cursor.execute(check_query, (admin_id,))
+            if self.cursor.fetchone():
+                print(f"Debug - Admin {admin_id} already exists in database")
+                return False
+            
+            query = "INSERT INTO admins (admin_id, name, password) VALUES (%s, %s, %s)"
+            self.cursor.execute(query, (admin_id, name, password))
+            self.connection.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"Error adding admin: {err}")
+            return False
+
+    def update_employee_equipment(self, emp_id, equipment_id):
+        try:
+            query = "UPDATE employees SET equipment_id = %s WHERE emp_id = %s"
+            self.cursor.execute(query, (equipment_id, emp_id))
+            self.connection.commit()
+            return True
+        except mysql.connector.Error as err:
+            print(f"Error updating employee equipment: {err}")
+            return False

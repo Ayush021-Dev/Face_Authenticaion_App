@@ -1,4 +1,6 @@
 # face_rec/app.py
+import subprocess
+import sys
 import streamlit as st
 import cv2
 import numpy as np
@@ -20,6 +22,11 @@ st.set_page_config(
     layout="wide"
 )
 
+# Check for redirection after successful login
+if st.session_state.get('redirect_to_logbook'):
+    st.session_state.redirect_to_logbook = False  # Reset the flag
+    st.switch_page("pages/logbook.py")
+
 # Initialize components
 @st.cache_resource
 def load_resources():
@@ -27,6 +34,13 @@ def load_resources():
     face_detector = FaceDetector()
     face_recognizer = FaceRecognizer()
     anti_spoof = AntiSpoofing()
+    
+    # Create default admin if no admins exist
+    try:
+        db_manager.add_admin("admin", "System Administrator", "admin123")
+    except:
+        pass  # Admin might already exist
+    
     return db_manager, face_detector, face_recognizer, anti_spoof
 
 db_manager, face_detector, face_recognizer, anti_spoof = load_resources()
@@ -66,67 +80,145 @@ if option == "Home":
 elif option == "Equipment Areas":
     st.header("Manage Equipment Areas")
     
-    # Add new equipment area
-    st.subheader("Add New Equipment Area")
-    with st.form(key="equipment_area_form"):
-        col1, col2 = st.columns(2)
+    # Admin Authentication
+    st.subheader("Admin Authentication")
+    with st.form(key="admin_auth_form"):
+        admin_id = st.text_input("Admin ID", help="Enter your admin ID")
+        admin_password = st.text_input("Admin Password", type="password", help="Enter your admin password")
         
-        with col1:
-            equipment_id = st.text_input("Equipment ID", help="Enter unique equipment ID")
-            equipment_name = st.text_input("Equipment Name", help="Enter equipment name")
-        
-        with col2:
-            st.write("**Location Settings:**")
-            # Get default location
-            default_lat, default_lon = get_location()
-            
-            area_lat = st.number_input(
-                "Area Center Latitude", 
-                value=default_lat if default_lat else 0.0,
-                format="%.6f",
-                help="Enter the latitude of the center point"
-            )
-            area_lon = st.number_input(
-                "Area Center Longitude", 
-                value=default_lon if default_lon else 0.0,
-                format="%.6f",
-                help="Enter the longitude of the center point"
-            )
-            area_radius = st.number_input(
-                "Allowed Radius (km)", 
-                min_value=0.1, 
-                value=1.0,
-                step=0.1,
-                help="Enter the radius in kilometers"
-            )
-        
-        # Location preview
-        if area_lat and area_lon:
-            st.write("**Location Preview:**")
-            st.markdown(f"[View on Map](https://www.google.com/maps?q={area_lat},{area_lon})")
-            st.info(f"Access will be allowed within {area_radius} km of this location")
-        
-        if st.form_submit_button("Add Equipment Area"):
-            if not equipment_id or not equipment_name:
-                st.error("Please provide both Equipment ID and Name")
+        if st.form_submit_button("Login"):
+            if db_manager.verify_admin(admin_id, admin_password):
+                st.session_state.admin_authenticated = True
+                st.session_state.admin_id = admin_id
+                st.success("Admin authentication successful!")
+                st.experimental_rerun()
             else:
-                if db_manager.add_equipment_area(equipment_id, equipment_name, area_lat, area_lon, area_radius):
-                    st.success(f"Equipment area '{equipment_name}' added successfully!")
-                    st.experimental_rerun()
-                else:
-                    st.error("Failed to add equipment area. Please try again.")
+                st.error("Invalid admin credentials!")
     
-    # Display existing equipment areas
-    st.subheader("Existing Equipment Areas")
-    equipment_areas = db_manager.get_all_equipment_areas()
-    if equipment_areas:
-        for area in equipment_areas:
-            with st.expander(f"{area[1]} (ID: {area[0]})"):
-                st.write(f"Location: {area[2]}, {area[3]}")
-                st.write(f"Radius: {area[4]} km")
-                st.markdown(f"[View on Map](https://www.google.com/maps?q={area[2]},{area[3]})")
+    # Only show equipment management if admin is authenticated
+    if st.session_state.get('admin_authenticated', False):
+        st.success(f"Logged in as Admin: {st.session_state.admin_id}")
+        
+        # Create tabs for Equipment Areas and Employee Management
+        tab1, tab2 = st.tabs(["Equipment Areas", "Employee Management"])
+        
+        with tab1:
+            # Add new equipment area
+            st.subheader("Add New Equipment Area")
+            with st.form(key="equipment_area_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    equipment_id = st.text_input("Equipment ID", help="Enter unique equipment ID")
+                    equipment_name = st.text_input("Equipment Name", help="Enter equipment name")
+                
+                with col2:
+                    st.write("**Location Settings:**")
+                    # Get default location
+                    default_lat, default_lon = get_location()
+                    
+                    area_lat = st.number_input(
+                        "Area Center Latitude", 
+                        value=default_lat if default_lat else 0.0,
+                        format="%.6f",
+                        help="Enter the latitude of the center point"
+                    )
+                    area_lon = st.number_input(
+                        "Area Center Longitude", 
+                        value=default_lon if default_lon else 0.0,
+                        format="%.6f",
+                        help="Enter the longitude of the center point"
+                    )
+                    area_radius = st.number_input(
+                        "Allowed Radius (km)", 
+                        min_value=0.1, 
+                        value=1.0,
+                        step=0.1,
+                        help="Enter the radius in kilometers"
+                    )
+                
+                # Location preview
+                if area_lat and area_lon:
+                    st.write("**Location Preview:**")
+                    st.markdown(f"[View on Map](https://www.google.com/maps?q={area_lat},{area_lon})")
+                    st.info(f"Access will be allowed within {area_radius} km of this location")
+                
+                if st.form_submit_button("Add Equipment Area"):
+                    if not equipment_id or not equipment_name:
+                        st.error("Please provide both Equipment ID and Name")
+                    else:
+                        if db_manager.add_equipment_area(equipment_id, equipment_name, area_lat, area_lon, area_radius):
+                            st.success(f"Equipment area '{equipment_name}' added successfully!")
+                            st.experimental_rerun()
+                        else:
+                            st.error("Failed to add equipment area. Please try again.")
+            
+            # Display existing equipment areas
+            st.subheader("Existing Equipment Areas")
+            equipment_areas = db_manager.get_all_equipment_areas()
+            if equipment_areas:
+                for area in equipment_areas:
+                    with st.expander(f"{area[1]} (ID: {area[0]})"):
+                        st.write(f"Location: {area[2]}, {area[3]}")
+                        st.write(f"Radius: {area[4]} km")
+                        st.markdown(f"[View on Map](https://www.google.com/maps?q={area[2]},{area[3]})")
+            else:
+                st.info("No equipment areas added yet.")
+        
+        with tab2:
+            st.subheader("Employee Management")
+            
+            # Get all employees
+            employees = db_manager.get_all_employees()
+            if employees:
+                # Create a form for each employee
+                for emp in employees:
+                    with st.expander(f"{emp[1]} (ID: {emp[0]})"):
+                        # Get current equipment assignment
+                        current_equipment = db_manager.get_employee(emp[0])
+                        current_equipment_id = current_equipment[3] if current_equipment else None
+                        
+                        # Get all equipment areas for selection
+                        equipment_areas = db_manager.get_all_equipment_areas()
+                        if equipment_areas:
+                            equipment_options = {f"{area[1]} (ID: {area[0]})": area[0] for area in equipment_areas}
+                            current_selection = next((k for k, v in equipment_options.items() if v == current_equipment_id), None)
+                            
+                            selected_equipment = st.selectbox(
+                                "Assigned Equipment Area",
+                                options=["None"] + list(equipment_options.keys()),
+                                index=0 if not current_selection else list(equipment_options.keys()).index(current_selection) + 1,
+                                key=f"equip_{emp[0]}"
+                            )
+                            
+                            if st.button("Update Assignment", key=f"update_{emp[0]}"):
+                                if selected_equipment == "None":
+                                    # Remove equipment assignment
+                                    if db_manager.update_employee_equipment(emp[0], None):
+                                        st.success("Equipment assignment removed!")
+                                        st.experimental_rerun()
+                                    else:
+                                        st.error("Failed to update assignment")
+                                else:
+                                    # Update equipment assignment
+                                    equipment_id = equipment_options[selected_equipment]
+                                    if db_manager.update_employee_equipment(emp[0], equipment_id):
+                                        st.success("Equipment assignment updated!")
+                                        st.experimental_rerun()
+                                    else:
+                                        st.error("Failed to update assignment")
+                        else:
+                            st.warning("No equipment areas available. Please add equipment areas first.")
+            else:
+                st.info("No employees registered yet.")
+        
+        # Add logout button
+        if st.button("Logout"):
+            st.session_state.admin_authenticated = False
+            st.session_state.admin_id = None
+            st.experimental_rerun()
     else:
-        st.info("No equipment areas added yet.")
+        st.warning("Please login as admin to manage equipment areas.")
 
 elif option == "Sign Up":
     st.header("Employee Registration")
@@ -143,25 +235,11 @@ elif option == "Sign Up":
         emp_id = st.text_input("Employee ID", help="Enter unique employee ID")
         name = st.text_input("Employee Name", help="Enter full name")
         
-        # Get equipment areas for selection
-        equipment_areas = db_manager.get_all_equipment_areas()
-        if equipment_areas:
-            equipment_options = {f"{area[1]} (ID: {area[0]})": area[0] for area in equipment_areas}
-            selected_equipment = st.selectbox(
-                "Assigned Equipment Area",
-                options=list(equipment_options.keys()),
-                help="Select the equipment area this employee will have access to"
-            )
-            equipment_id = equipment_options[selected_equipment]
-        else:
-            st.error("No equipment areas available. Please add equipment areas first.")
-            equipment_id = None
-        
         # Store information in session state when form is submitted
         info_submitted = st.form_submit_button("Confirm Information & Proceed to Face Capture")
         
         if info_submitted:
-            if not emp_id or not name or not equipment_id:
+            if not emp_id or not name:
                 st.error("Please provide all required information")
             else:
                 # Check if employee ID already exists
@@ -172,7 +250,6 @@ elif option == "Sign Up":
                     # Store in session state
                     st.session_state.emp_id = emp_id
                     st.session_state.emp_name = name
-                    st.session_state.equipment_id = equipment_id
                     st.session_state.info_confirmed = True
                     st.success("Information confirmed! Now proceed to face capture.")
                     st.experimental_rerun()
@@ -183,7 +260,6 @@ elif option == "Sign Up":
         
         # Display confirmed information
         st.info(f"**Employee:** {st.session_state.emp_name} (ID: {st.session_state.emp_id})")
-        st.info(f"**Assigned Equipment:** {selected_equipment}")
         
         col1, col2 = st.columns(2)
         
@@ -225,6 +301,12 @@ elif option == "Sign Up":
                         faces = face_detector.detect_face_dnn(frame)
                         
                         if faces:
+                            # Check for multiple faces
+                            if len(faces) > 1:
+                                status_text.text("⚠️ Multiple faces detected! Please ensure only one face is in frame.")
+                                time.sleep(1)
+                                continue
+                                
                             # Get the first face
                             x, y, w, h = faces[0]
                             face_location = face_detector.convert_rect_format(x, y, w, h)
@@ -294,9 +376,6 @@ elif option == "Sign Up":
             st.write(f"**Name:** {st.session_state.emp_name}")
             st.write(f"**Face:** ✅ Captured")
         
-        with col2:
-            st.write(f"**Assigned Equipment:** {selected_equipment}")
-        
         # Final registration button
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -310,7 +389,7 @@ elif option == "Sign Up":
                         st.session_state.emp_id,
                         st.session_state.emp_name,
                         serialized_encoding,
-                        st.session_state.equipment_id
+                        None  # No equipment assignment during registration
                     ):
                         # Update recognizer
                         face_recognizer.add_face(st.session_state.avg_encoding, st.session_state.emp_id)
@@ -321,7 +400,7 @@ elif option == "Sign Up":
                         
                         # Clear session state
                         for key in ['info_confirmed', 'face_captured', 'face_encodings', 'avg_encoding', 
-                                   'emp_id', 'emp_name', 'equipment_id']:
+                                   'emp_id', 'emp_name']:
                             if key in st.session_state:
                                 del st.session_state[key]
                         
@@ -338,7 +417,7 @@ elif option == "Sign Up":
         if st.button("🔄 Start Over", key="start_over"):
             # Clear all session state
             for key in ['info_confirmed', 'face_captured', 'face_encodings', 'avg_encoding', 
-                       'emp_id', 'emp_name', 'equipment_id']:
+                       'emp_id', 'emp_name']:
                 if key in st.session_state:
                     del st.session_state[key]
             st.experimental_rerun()
@@ -374,6 +453,7 @@ elif option == "Login":
             while time.time() - start_time < 10 and not login_successful:
                 ret, frame = cap.read()
                 if not ret:
+                
                     st.error("Could not access camera")
                     break
                 
@@ -383,6 +463,12 @@ elif option == "Login":
                 # Display the frame in the second column
                 with col2:
                     if faces:
+                        # Check for multiple faces
+                        if len(faces) > 1:
+                            status_text.text("⚠️ Multiple faces detected! Please ensure only one face is in frame.")
+                            time.sleep(1)
+                            continue
+                            
                         # Draw rectangle around face
                         for (x, y, w, h) in faces:
                             cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
@@ -447,6 +533,14 @@ elif option == "Login":
                                 st.write(f"Your location: {latitude}, {longitude}")
                                 st.write(f"Distance from equipment: {distance:.2f} km")
                                 st.markdown(f"[View on Map](https://www.google.com/maps?q={latitude},{longitude})")
+                        
+                        # Set session state for logged in user and redirection
+                        st.session_state.logged_in_user = recognized_emp_id
+                        st.session_state.user_name = employee[1]
+                        st.session_state.redirect_to_logbook = True
+                        st.success("🚀 Redirecting to Operations Logbook...")
+                        time.sleep(2)
+                        st.experimental_rerun()
                     else:
                         progress.progress(1.0)
                         st.error("Login denied: You are not in the authorized equipment area.")
