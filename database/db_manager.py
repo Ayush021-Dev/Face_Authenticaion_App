@@ -62,11 +62,11 @@ class DatabaseManager:
             # Equipment areas table
             self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS equipment_areas (
-                equipment_id VARCHAR(20) PRIMARY KEY,
-                equipment_name VARCHAR(100) NOT NULL,
+                equipment_name VARCHAR(100) PRIMARY KEY,
                 area_lat FLOAT NOT NULL,
                 area_lon FLOAT NOT NULL,
                 area_radius FLOAT NOT NULL,
+                num_equipment INT NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             ''')
@@ -77,9 +77,9 @@ class DatabaseManager:
                 emp_id VARCHAR(20) PRIMARY KEY,
                 name VARCHAR(100) NOT NULL,
                 face_encoding LONGBLOB NOT NULL,
-                equipment_id VARCHAR(20),
+                equipment_name VARCHAR(100),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (equipment_id) REFERENCES equipment_areas(equipment_id)
+                FOREIGN KEY (equipment_name) REFERENCES equipment_areas(equipment_name)
             )
             ''')
             
@@ -108,7 +108,7 @@ class DatabaseManager:
             self.connection.close()
             print("MySQL connection closed")
 
-    def register_employee(self, emp_id, name, face_encoding, equipment_id):
+    def register_employee(self, emp_id, name, face_encoding, equipment_name):
         try:
             # First check if employee already exists
             check_query = "SELECT emp_id FROM employees WHERE emp_id = %s"
@@ -117,13 +117,13 @@ class DatabaseManager:
                 print(f"Debug - Employee {emp_id} already exists in database")
                 return False
             
-            # Check if equipment area exists only if equipment_id is provided
-            if equipment_id and not self.get_equipment_area(equipment_id):
-                print(f"Debug - Equipment area {equipment_id} does not exist")
+            # Check if equipment area exists only if equipment_name is provided
+            if equipment_name and not self.get_equipment_area(equipment_name):
+                print(f"Debug - Equipment area {equipment_name} does not exist")
                 return False
             
-            query = "INSERT INTO employees (emp_id, name, face_encoding, equipment_id) VALUES (%s, %s, %s, %s)"
-            self.cursor.execute(query, (emp_id, name, face_encoding, equipment_id))
+            query = "INSERT INTO employees (emp_id, name, face_encoding, equipment_name) VALUES (%s, %s, %s, %s)"
+            self.cursor.execute(query, (emp_id, name, face_encoding, equipment_name))
             self.connection.commit()
             return True
         except mysql.connector.Error as err:
@@ -185,10 +185,10 @@ class DatabaseManager:
     
     def get_employee(self, emp_id):
         query = """
-        SELECT e.emp_id, e.name, e.face_encoding, e.equipment_id,
+        SELECT e.emp_id, e.name, e.face_encoding, e.equipment_name,
                ea.area_lat, ea.area_lon, ea.area_radius
         FROM employees e
-        LEFT JOIN equipment_areas ea ON e.equipment_id = ea.equipment_id
+        LEFT JOIN equipment_areas ea ON e.equipment_name = ea.equipment_name
         WHERE e.emp_id = %s
         """
         self.cursor.execute(query, (emp_id,))
@@ -261,23 +261,23 @@ class DatabaseManager:
             print(f"Error checking face existence: {err}")
             return False, None, None
 
-    def add_equipment_area(self, equipment_id, equipment_name, area_lat, area_lon, area_radius):
+    def add_equipment_area(self, equipment_name, area_lat, area_lon, area_radius, num_equipment):
         try:
             query = """
-            INSERT INTO equipment_areas (equipment_id, equipment_name, area_lat, area_lon, area_radius)
+            INSERT INTO equipment_areas (equipment_name, area_lat, area_lon, area_radius, num_equipment)
             VALUES (%s, %s, %s, %s, %s)
             """
-            self.cursor.execute(query, (equipment_id, equipment_name, area_lat, area_lon, area_radius))
+            self.cursor.execute(query, (equipment_name, area_lat, area_lon, area_radius, num_equipment))
             self.connection.commit()
             return True
         except mysql.connector.Error as err:
             print(f"Error adding equipment area: {err}")
             return False
 
-    def get_equipment_area(self, equipment_id):
+    def get_equipment_area(self, equipment_name):
         try:
-            query = "SELECT * FROM equipment_areas WHERE equipment_id = %s"
-            self.cursor.execute(query, (equipment_id,))
+            query = "SELECT * FROM equipment_areas WHERE equipment_name = %s"
+            self.cursor.execute(query, (equipment_name,))
             return self.cursor.fetchone()
         except mysql.connector.Error as err:
             print(f"Error getting equipment area: {err}")
@@ -319,10 +319,10 @@ class DatabaseManager:
             print(f"Error adding admin: {err}")
             return False
 
-    def update_employee_equipment(self, emp_id, equipment_id):
+    def update_employee_equipment(self, emp_id, equipment_name):
         try:
-            query = "UPDATE employees SET equipment_id = %s WHERE emp_id = %s"
-            self.cursor.execute(query, (equipment_id, emp_id))
+            query = "UPDATE employees SET equipment_name = %s WHERE emp_id = %s"
+            self.cursor.execute(query, (equipment_name, emp_id))
             self.connection.commit()
             return True
         except mysql.connector.Error as err:

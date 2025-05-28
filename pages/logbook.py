@@ -7,6 +7,7 @@ import pandas as pd
 import speech_recognition as sr
 from datetime import datetime
 import os
+from database.db_manager import DatabaseManager
 
 # Check if user is logged in
 if 'logged_in_user' not in st.session_state:
@@ -496,6 +497,22 @@ if 'error' not in st.session_state:
 if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
 
+# Get user's assigned area and equipment count
+db_manager = DatabaseManager()
+user_id = st.session_state.get('logged_in_user')
+user_info = db_manager.get_employee(user_id)
+if not user_info:
+    st.error("User information not found!")
+    st.stop()
+
+assigned_area = user_info[3]  # equipment_name
+area_info = db_manager.get_equipment_area(assigned_area)
+if not area_info:
+    st.error("Assigned area information not found!")
+    st.stop()
+
+num_equipment = area_info[4]  # num_equipment field
+
 # Define fixed areas and their parameters with ranges
 AREA_PARAMETERS = {
     "Area 1 - Crude Processing": {
@@ -527,19 +544,21 @@ AREA_PARAMETERS = {
 def initialize_excel():
     """Initialize the Excel file if it doesn't exist"""
     if not os.path.exists('bina_refinery_log.xlsx'):
-        df = pd.DataFrame(columns=['Area', 'Parameter', 'Value', 'Unit', 'Timestamp', 'Status'])
+        df = pd.DataFrame(columns=['Timestamp', 'User', 'Area', 'Equipment', 'Parameter', 'Value', 'Unit', 'Status'])
         df.to_excel('bina_refinery_log.xlsx', index=False)
 
-def append_to_excel(area, parameter, value, unit, status):
+def append_to_excel(equipment, parameter, value, unit, status):
     """Append a new reading to the Excel file only if value is within range"""
     if status == "Normal":
         df = pd.read_excel('bina_refinery_log.xlsx')
         new_row = {
-            'Area': area,
+            'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'User': f"{st.session_state.user_name} (ID: {st.session_state.logged_in_user})",
+            'Area': assigned_area,
+            'Equipment': equipment,
             'Parameter': parameter,
             'Value': value,
             'Unit': unit,
-            'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'Status': status
         }
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
@@ -617,33 +636,39 @@ def remove_last_entry_from_excel():
 # Initialize the Excel file
 initialize_excel()
 
+# Check if user is logged in
+if not st.session_state.get('logged_in_user'):
+    st.warning("Please login first!")
+    st.stop()
+
 # Streamlit UI
 st.title("Bina Refinery Operations Logbook")
-st.write("Step-by-step logbook for refinery operations")
+st.write(f"Welcome to {assigned_area} Operations Logbook")
 
 # Step indicator
 total_steps = 2
 current_step = st.session_state.current_step
 st.progress(current_step / total_steps)
 
-# Step 1: Area Selection
+# Step 1: Equipment Selection
 if current_step == 1:
-    st.subheader("Step 1: Select Area")
-    area = st.radio("Choose Area", options=list(AREA_PARAMETERS.keys()))
+    st.subheader("Step 1: Select Equipment")
+    equipment_options = [f"Equipment {i+1}" for i in range(num_equipment)]
+    equipment = st.radio("Choose Equipment", options=equipment_options)
     
     if st.button("Next"):
-        st.session_state.selected_area = area
+        st.session_state.selected_equipment = equipment
         st.session_state.current_step = 2
         st.rerun()
 
 # Step 2: Parameter Input
 elif current_step == 2:
-    st.subheader(f"Step 2: Enter Parameters for {st.session_state.selected_area}")
+    st.subheader(f"Step 2: Enter Parameters for {st.session_state.selected_equipment}")
     
     # Create columns for parameters
     cols = st.columns(2)
     
-    for i, (param, range_info) in enumerate(AREA_PARAMETERS[st.session_state.selected_area].items()):
+    for i, (param, range_info) in enumerate(AREA_PARAMETERS[assigned_area].items()):
         with cols[i % 2]:
             st.markdown(f"""
             <div class="parameter-card">
@@ -664,7 +689,7 @@ elif current_step == 2:
                         if value is not None:
                             status = check_value_range(value, range_info['min'], range_info['max'])
                             if status == "Normal":
-                                if append_to_excel(st.session_state.selected_area, param, value, range_info['unit'], status):
+                                if append_to_excel(st.session_state.selected_equipment, param, value, range_info['unit'], status):
                                     st.success(f"✅ Successfully logged: {param} = {value} {range_info['unit']}")
                             else:
                                 st.error(f"⚠️ ALERT: {param} value {value} {range_info['unit']} is {status}! Must be between {range_info['min']} and {range_info['max']} {range_info['unit']}")
@@ -672,16 +697,8 @@ elif current_step == 2:
                             st.error("❌ Could not extract a numeric value from the voice input")
                             st.info("💡 Try speaking the number clearly, for example: 'one hundred twenty three point five'")
     
-    # Back button with custom styling
-    st.markdown("""
-    <style>
-    .back-button {
-        background: linear-gradient(45deg, #3a3a3a, #2b2b2b) !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    if st.button("← Back to Area Selection", key="back_button"):
+    # Back button
+    if st.button("← Back to Equipment Selection", key="back_button"):
         st.session_state.current_step = 1
         st.rerun()
 

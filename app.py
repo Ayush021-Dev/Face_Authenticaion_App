@@ -109,8 +109,8 @@ elif option == "Equipment Areas":
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    equipment_id = st.text_input("Equipment ID", help="Enter unique equipment ID")
                     equipment_name = st.text_input("Equipment Name", help="Enter equipment name")
+                    num_equipment = st.number_input("Number of Equipment", min_value=1, value=1, help="Enter number of equipment in this area")
                 
                 with col2:
                     st.write("**Location Settings:**")
@@ -144,10 +144,10 @@ elif option == "Equipment Areas":
                     st.info(f"Access will be allowed within {area_radius} km of this location")
                 
                 if st.form_submit_button("Add Equipment Area"):
-                    if not equipment_id or not equipment_name:
-                        st.error("Please provide both Equipment ID and Name")
+                    if not equipment_name:
+                        st.error("Please provide Equipment Name")
                     else:
-                        if db_manager.add_equipment_area(equipment_id, equipment_name, area_lat, area_lon, area_radius):
+                        if db_manager.add_equipment_area(equipment_name, area_lat, area_lon, area_radius, num_equipment):
                             st.success(f"Equipment area '{equipment_name}' added successfully!")
                             st.experimental_rerun()
                         else:
@@ -158,10 +158,10 @@ elif option == "Equipment Areas":
             equipment_areas = db_manager.get_all_equipment_areas()
             if equipment_areas:
                 for area in equipment_areas:
-                    with st.expander(f"{area[1]} (ID: {area[0]})"):
-                        st.write(f"Location: {area[2]}, {area[3]}")
-                        st.write(f"Radius: {area[4]} km")
-                        st.markdown(f"[View on Map](https://www.google.com/maps?q={area[2]},{area[3]})")
+                    with st.expander(f"{area[0]} ({area[4]} equipment)"):
+                        st.write(f"Location: {area[1]}, {area[2]}")
+                        st.write(f"Radius: {area[3]} km")
+                        st.markdown(f"[View on Map](https://www.google.com/maps?q={area[1]},{area[2]})")
             else:
                 st.info("No equipment areas added yet.")
         
@@ -181,7 +181,7 @@ elif option == "Equipment Areas":
                         # Get all equipment areas for selection
                         equipment_areas = db_manager.get_all_equipment_areas()
                         if equipment_areas:
-                            equipment_options = {f"{area[1]} (ID: {area[0]})": area[0] for area in equipment_areas}
+                            equipment_options = {f"{area[0]} ({area[4]} equipment)": area[0] for area in equipment_areas}
                             current_selection = next((k for k, v in equipment_options.items() if v == current_equipment_id), None)
                             
                             selected_equipment = st.selectbox(
