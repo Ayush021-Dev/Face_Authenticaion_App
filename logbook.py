@@ -479,34 +479,6 @@ if 'error' not in st.session_state:
 if 'current_step' not in st.session_state:
     st.session_state.current_step = 1
 
-# Define fixed areas and their parameters with ranges
-AREA_PARAMETERS = {
-    "Area 1 - Crude Processing": {
-        "Top Temperature": {"min": 100, "max": 150, "unit": "°C"},
-        "Bottom Temperature": {"min": 200, "max": 250, "unit": "°C"},
-        "Feed Rate": {"min": 1000, "max": 2000, "unit": "BPD"},
-        "Pressure": {"min": 1, "max": 3, "unit": "bar"}
-    },
-    "Area 2 - Vacuum Processing": {
-        "Vacuum Pressure": {"min": 0.1, "max": 0.5, "unit": "bar"},
-        "Feed Temperature": {"min": 150, "max": 200, "unit": "°C"},
-        "Bottom Temperature": {"min": 250, "max": 300, "unit": "°C"},
-        "Steam Rate": {"min": 500, "max": 1000, "unit": "kg/hr"}
-    },
-    "Area 3 - Power Generation": {
-        "Steam Pressure": {"min": 40, "max": 60, "unit": "bar"},
-        "Steam Temperature": {"min": 400, "max": 450, "unit": "°C"},
-        "Power Generation": {"min": 50, "max": 100, "unit": "MW"},
-        "Boiler Efficiency": {"min": 80, "max": 95, "unit": "%"}
-    },
-    "Area 4 - Water Treatment": {
-        "pH Level": {"min": 6.5, "max": 8.5, "unit": "pH"},
-        "COD": {"min": 0, "max": 100, "unit": "mg/L"},
-        "Oil Content": {"min": 0, "max": 10, "unit": "mg/L"},
-        "Flow Rate": {"min": 100, "max": 500, "unit": "m³/hr"}
-    }
-}
-
 def initialize_excel():
     """Initialize the Excel file if it doesn't exist"""
     if not os.path.exists('bina_refinery_log.xlsx'):

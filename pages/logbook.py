@@ -511,60 +511,28 @@ if not area_info:
     st.error("Assigned area information not found!")
     st.stop()
 
-num_equipment = area_info[4]  # num_equipment field
-
-# Define fixed areas and their parameters with ranges
-AREA_PARAMETERS = {
-    "Area 1 - Crude Processing": {
-        "Top Temperature": {"min": 100, "max": 150, "unit": "°C"},
-        "Bottom Temperature": {"min": 200, "max": 250, "unit": "°C"},
-        "Feed Rate": {"min": 1000, "max": 2000, "unit": "BPD"},
-        "Pressure": {"min": 1, "max": 3, "unit": "bar"}
-    },
-    "Area 2 - Vacuum Processing": {
-        "Vacuum Pressure": {"min": 0.1, "max": 0.5, "unit": "bar"},
-        "Feed Temperature": {"min": 150, "max": 200, "unit": "°C"},
-        "Bottom Temperature": {"min": 250, "max": 300, "unit": "°C"},
-        "Steam Rate": {"min": 500, "max": 1000, "unit": "kg/hr"}
-    },
-    "Area 3 - Power Generation": {
-        "Steam Pressure": {"min": 40, "max": 60, "unit": "bar"},
-        "Steam Temperature": {"min": 400, "max": 450, "unit": "°C"},
-        "Power Generation": {"min": 50, "max": 100, "unit": "MW"},
-        "Boiler Efficiency": {"min": 80, "max": 95, "unit": "%"}
-    },
-    "Area 4 - Water Treatment": {
-        "pH Level": {"min": 6.5, "max": 8.5, "unit": "pH"},
-        "COD": {"min": 0, "max": 100, "unit": "mg/L"},
-        "Oil Content": {"min": 0, "max": 10, "unit": "mg/L"},
-        "Flow Rate": {"min": 100, "max": 500, "unit": "m³/hr"}
-    }
-}
+num_equipment = area_info[4]
 
 def initialize_excel():
     """Initialize the Excel file if it doesn't exist"""
     if not os.path.exists('bina_refinery_log.xlsx'):
-        df = pd.DataFrame(columns=['Timestamp', 'User', 'Area', 'Equipment', 'Parameter', 'Value', 'Unit', 'Status'])
+        df = pd.DataFrame(columns=['Timestamp', 'User', 'Area', 'Equipment', 'Parameter', 'Value'])
         df.to_excel('bina_refinery_log.xlsx', index=False)
 
-def append_to_excel(equipment, parameter, value, unit, status):
-    """Append a new reading to the Excel file only if value is within range"""
-    if status == "Normal":
-        df = pd.read_excel('bina_refinery_log.xlsx')
-        new_row = {
-            'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'User': f"{st.session_state.user_name} (ID: {st.session_state.logged_in_user})",
-            'Area': assigned_area,
-            'Equipment': equipment,
-            'Parameter': parameter,
-            'Value': value,
-            'Unit': unit,
-            'Status': status
-        }
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        df.to_excel('bina_refinery_log.xlsx', index=False)
-        return True
-    return False
+def append_to_excel(equipment, parameter, value):
+    """Append a new reading to the Excel file"""
+    df = pd.read_excel('bina_refinery_log.xlsx')
+    new_row = {
+        'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        'User': f"{st.session_state.user_name} (ID: {st.session_state.logged_in_user})",
+        'Area': assigned_area,
+        'Equipment': equipment,
+        'Parameter': parameter,
+        'Value': value
+    }
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    df.to_excel('bina_refinery_log.xlsx', index=False)
+    return True
 
 def get_voice_input():
     """Capture voice input using speech_recognition with enhanced error handling"""
@@ -600,13 +568,50 @@ def get_voice_input():
         """)
         return None
 
-def extract_numeric_value(text):
-    """Extract numeric value from text"""
+def extract_parameter_value_pairs(text):
+    """Extract multiple parameter-value pairs from text"""
     import re
-    numbers = re.findall(r"[-+]?\d*\.\d+|\d+", text)
-    if numbers:
-        return float(numbers[0])
-    return None
+    
+    # Convert text to lowercase for better matching
+    text = text.lower()
+    
+    # Split the text by common separators
+    separators = [',', 'and', '&', ';']
+    for sep in separators:
+        text = text.replace(sep, '|')
+    parts = text.split('|')
+    
+    # Process each part
+    results = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+            
+        # Extract numeric value
+        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", part)
+        if not numbers:
+            continue
+            
+        value = float(numbers[0])
+        
+        # Extract parameter name
+        # Remove common words and clean up
+        words_to_remove = ['is', 'are', 'was', 'were', 'equals', 'equal', 'to', 'at']
+        parameter = part
+        for word in words_to_remove:
+            parameter = parameter.replace(word, '')
+        
+        # Get everything before the number
+        parameter = parameter.split(str(numbers[0]))[0].strip()
+        
+        # Capitalize first letter of each word
+        parameter = ' '.join(word.capitalize() for word in parameter.split())
+        
+        if parameter:  # Only add if we found a parameter name
+            results.append((parameter, value))
+    
+    return results
 
 def check_value_range(value, min_val, max_val):
     """Check if value is within range and return status"""
@@ -645,74 +650,66 @@ if not st.session_state.get('logged_in_user'):
 st.title("Bina Refinery Operations Logbook")
 st.write(f"Welcome to {assigned_area} Operations Logbook")
 
-# Step indicator
-total_steps = 2
-current_step = st.session_state.current_step
-st.progress(current_step / total_steps)
+# Display equipment cards
+st.subheader("Equipment Readings")
+cols = st.columns(min(3, num_equipment))  # Show max 3 columns
 
-# Step 1: Equipment Selection
-if current_step == 1:
-    st.subheader("Step 1: Select Equipment")
-    equipment_options = [f"Equipment {i+1}" for i in range(num_equipment)]
-    equipment = st.radio("Choose Equipment", options=equipment_options)
-    
-    if st.button("Next"):
-        st.session_state.selected_equipment = equipment
-        st.session_state.current_step = 2
-        st.rerun()
-
-# Step 2: Parameter Input
-elif current_step == 2:
-    st.subheader(f"Step 2: Enter Parameters for {st.session_state.selected_equipment}")
-    
-    # Create columns for parameters
-    cols = st.columns(2)
-    
-    for i, (param, range_info) in enumerate(AREA_PARAMETERS[assigned_area].items()):
-        with cols[i % 2]:
-            st.markdown(f"""
-            <div class="parameter-card">
-                <h3>{param}</h3>
-                <div class="range-display">
-                    Valid Range: {range_info['min']} - {range_info['max']} {range_info['unit']}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            # Voice input button
-            if st.button(f"🎤 Voice Input for {param}", key=f"voice_{param}"):
+for i in range(num_equipment):
+    with cols[i % 3]:
+        st.markdown(f"""
+        <div style='background-color: #1f2937; padding: 20px; border-radius: 10px; margin-bottom: 20px;'>
+            <h3 style='color: #60a5fa;'>Equipment {i+1}</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Create a form for each equipment
+        with st.form(key=f"equipment_{i+1}"):
+            # Form submit button for voice input
+            if st.form_submit_button("🎤 Start Voice Input"):
                 with st.spinner("🎤 Listening..."):
                     voice_input = get_voice_input()
                     if voice_input:
                         st.write(f"🎯 Voice Input: {voice_input}")
-                        value = extract_numeric_value(voice_input)
-                        if value is not None:
-                            status = check_value_range(value, range_info['min'], range_info['max'])
-                            if status == "Normal":
-                                if append_to_excel(st.session_state.selected_equipment, param, value, range_info['unit'], status):
-                                    st.success(f"✅ Successfully logged: {param} = {value} {range_info['unit']}")
-                            else:
-                                st.error(f"⚠️ ALERT: {param} value {value} {range_info['unit']} is {status}! Must be between {range_info['min']} and {range_info['max']} {range_info['unit']}")
+                        parameter_value_pairs = extract_parameter_value_pairs(voice_input)
+                        
+                        if parameter_value_pairs:
+                            # Add to session state
+                            if f"Equipment {i+1}" not in st.session_state.readings:
+                                st.session_state.readings[f"Equipment {i+1}"] = []
+                            
+                            # Process each parameter-value pair
+                            for parameter, value in parameter_value_pairs:
+                                st.session_state.readings[f"Equipment {i+1}"].append({
+                                    'parameter': parameter,
+                                    'value': value,
+                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                })
+                                
+                                # Append to Excel
+                                append_to_excel(f"Equipment {i+1}", parameter, value)
+                                st.success(f"✅ Successfully logged: {parameter} = {value}")
                         else:
-                            st.error("❌ Could not extract a numeric value from the voice input")
-                            st.info("💡 Try speaking the number clearly, for example: 'one hundred twenty three point five'")
-    
-    # Back button
-    if st.button("← Back to Equipment Selection", key="back_button"):
-        st.session_state.current_step = 1
-        st.rerun()
+                            st.error("❌ Could not extract any parameter-value pairs from the voice input")
+                            st.info("💡 Try speaking clearly, for example: 'Temperature is 120, Current is 200, Pressure is 2.5'")
 
-# Display current log with enhanced styling
-# ... removed subheader and log display block ...
+# Display current readings
+st.subheader("Current Readings")
+for equipment, readings in st.session_state.readings.items():
+    with st.expander(f"{equipment} Readings"):
+        for reading in readings:
+            st.write(f"Parameter: {reading['parameter']}")
+            st.write(f"Value: {reading['value']}")
+            st.write(f"Time: {reading['timestamp']}")
+            st.markdown("---")
 
-# Export button with enhanced styling
-if st.button("📥 Export Readings as CSV"):
+# Export button
+if st.button("📥 Export Readings as Excel"):
     try:
         df_export = pd.read_excel('bina_refinery_log.xlsx')
         if not df_export.empty:
             csv = df_export.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="⬇️ Download CSV",
+                label="⬇️ Download Excel",
                 data=csv,
                 file_name="readings.csv",
                 mime="text/csv",
@@ -720,17 +717,11 @@ if st.button("📥 Export Readings as CSV"):
             )
         else:
             st.warning("No readings to export.")
-    except FileNotFoundError:
-        st.warning("No readings to export yet (Excel file not found).")
     except Exception as e:
-        st.error(f"An error occurred during CSV export: {e}")
+        st.error(f"An error occurred during export: {e}")
 
-# Button to remove last entry
-if st.button("🗑️ Remove Last Entry"):
-    if remove_last_entry_from_excel():
-        st.success("Successfully removed the last log entry.")
-        # Optional: Rerun to reflect change if log was visible
-        # st.rerun()
-    else:
-        st.warning("No entries to remove or file not found.") 
-        st.warning("No entries to remove or file not found.") 
+# Clear readings button
+if st.button("🗑️ Clear All Readings"):
+    st.session_state.readings = {}
+    st.success("All readings cleared!")
+    st.rerun() 
