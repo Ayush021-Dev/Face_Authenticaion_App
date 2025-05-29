@@ -8,6 +8,16 @@ import pickle
 from datetime import datetime
 import time
 import os
+import warnings
+import tracemalloc
+
+# Suppress specific warnings
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', message='.*coroutine.*')
+
+# Enable tracemalloc
+tracemalloc.start()
 
 from database.db_manager import DatabaseManager
 from face_utils.detector import FaceDetector
@@ -55,7 +65,7 @@ st.title("🔐 Face Authentication System")
 
 # Sidebar for navigation
 st.sidebar.title("Navigation")
-option = st.sidebar.radio("Go to", ["Home", "Equipment Areas", "Sign Up", "Login"])
+option = st.sidebar.radio("Go to", ["Home", "Areas", "Sign Up", "Login"])
 
 if option == "Home":
     st.header("Welcome to Face Authentication System")
@@ -77,7 +87,7 @@ if option == "Home":
     - Equipment area-based access control
     """)
 
-elif option == "Equipment Areas":
+elif option == "Areas":
     st.header("Manage Equipment Areas")
     
     # Admin Authentication
@@ -91,7 +101,7 @@ elif option == "Equipment Areas":
                 st.session_state.admin_authenticated = True
                 st.session_state.admin_id = admin_id
                 st.success("Admin authentication successful!")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid admin credentials!")
     
@@ -100,16 +110,16 @@ elif option == "Equipment Areas":
         st.success(f"Logged in as Admin: {st.session_state.admin_id}")
         
         # Create tabs for Equipment Areas and Employee Management
-        tab1, tab2 = st.tabs(["Equipment Areas", "Employee Management"])
+        tab1, tab2 = st.tabs(["Areas", "Employee Management"])
         
         with tab1:
             # Add new equipment area
-            st.subheader("Add New Equipment Area")
+            st.subheader("Add New Area")
             with st.form(key="equipment_area_form"):
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    equipment_name = st.text_input("Equipment Name", help="Enter equipment name")
+                    equipment_name = st.text_input("Area Name", help="Enter equipment name")
                     num_equipment = st.number_input("Number of Equipment", min_value=1, value=1, help="Enter number of equipment in this area")
                 
                 with col2:
@@ -143,13 +153,13 @@ elif option == "Equipment Areas":
                     st.markdown(f"[View on Map](https://www.google.com/maps?q={area_lat},{area_lon})")
                     st.info(f"Access will be allowed within {area_radius} km of this location")
                 
-                if st.form_submit_button("Add Equipment Area"):
+                if st.form_submit_button("Add Area"):
                     if not equipment_name:
                         st.error("Please provide Equipment Name")
                     else:
                         if db_manager.add_equipment_area(equipment_name, area_lat, area_lon, area_radius, num_equipment):
                             st.success(f"Equipment area '{equipment_name}' added successfully!")
-                            st.experimental_rerun()
+                            st.rerun()
                         else:
                             st.error("Failed to add equipment area. Please try again.")
             
@@ -196,7 +206,7 @@ elif option == "Equipment Areas":
                                     # Remove equipment assignment
                                     if db_manager.update_employee_equipment(emp[0], None):
                                         st.success("Equipment assignment removed!")
-                                        st.experimental_rerun()
+                                        st.rerun()
                                     else:
                                         st.error("Failed to update assignment")
                                 else:
@@ -204,7 +214,7 @@ elif option == "Equipment Areas":
                                     equipment_id = equipment_options[selected_equipment]
                                     if db_manager.update_employee_equipment(emp[0], equipment_id):
                                         st.success("Equipment assignment updated!")
-                                        st.experimental_rerun()
+                                        st.rerun()
                                     else:
                                         st.error("Failed to update assignment")
                         else:
@@ -216,7 +226,7 @@ elif option == "Equipment Areas":
         if st.button("Logout"):
             st.session_state.admin_authenticated = False
             st.session_state.admin_id = None
-            st.experimental_rerun()
+            st.rerun()
     else:
         st.warning("Please login as admin to manage equipment areas.")
 
@@ -252,7 +262,7 @@ elif option == "Sign Up":
                     st.session_state.emp_name = name
                     st.session_state.info_confirmed = True
                     st.success("Information confirmed! Now proceed to face capture.")
-                    st.experimental_rerun()
+                    st.rerun()
     
     # Step 2: Face Capture (only show if info is confirmed)
     if st.session_state.get('info_confirmed', False):
@@ -352,7 +362,7 @@ elif option == "Sign Up":
                             progress.progress(1.0)
                             status_text.text("Face captured successfully!")
                             st.success("Face captured successfully! You can now complete the registration.")
-                            st.experimental_rerun()
+                            st.rerun()
                     else:
                         st.error("Could not capture enough clear face images. Please try again.")
             else:
@@ -361,7 +371,7 @@ elif option == "Sign Up":
                     st.session_state.face_captured = False
                     st.session_state.face_encodings = []
                     st.session_state.avg_encoding = None
-                    st.experimental_rerun()
+                    st.rerun()
     
     # Step 3: Final Registration (only show if both info confirmed and face captured)
     if st.session_state.get('info_confirmed', False) and st.session_state.get('face_captured', False):
@@ -406,7 +416,7 @@ elif option == "Sign Up":
                         
                         st.balloons()
                         time.sleep(2)
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("Failed to register employee. Please try again.")
                         
@@ -420,7 +430,7 @@ elif option == "Sign Up":
                        'emp_id', 'emp_name']:
                 if key in st.session_state:
                     del st.session_state[key]
-            st.experimental_rerun()
+            st.rerun()
 
 elif option == "Login":
     st.header("Employee Login")
@@ -540,7 +550,7 @@ elif option == "Login":
                         st.session_state.redirect_to_logbook = True
                         st.success("🚀 Redirecting to Operations Logbook...")
                         time.sleep(2)
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         progress.progress(1.0)
                         st.error("Login denied: You are not in the authorized equipment area.")
