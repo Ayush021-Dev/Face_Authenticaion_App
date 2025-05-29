@@ -543,10 +543,10 @@ def get_voice_input():
         with sr.Microphone() as source:
             st.info("🎤 Adjusting for ambient noise... Please wait.")
             recognizer.adjust_for_ambient_noise(source, duration=2)
-            st.info("🎤 Listening... Please speak now.")
+            st.info("🎤 Listening... Please speak now (you can mention multiple parameters)")
             
-            # Set timeout and phrase time limit
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
+            # Increased timeout for multiple parameters
+            audio = recognizer.listen(source, timeout=10, phrase_time_limit=15)
             
             try:
                 text = recognizer.recognize_google(audio)
@@ -569,47 +569,62 @@ def get_voice_input():
         return None
 
 def extract_parameter_value_pairs(text):
-    """Extract multiple parameter-value pairs from text"""
+    """Extract multiple parameter-value pairs from text - handles 'param is value param is value' pattern"""
     import re
     
-    # Convert text to lowercase for better matching
+    # Convert to lowercase for consistent processing
     text = text.lower()
     
-    # Split the text by common separators
-    separators = [',', 'and', '&', ';']
-    for sep in separators:
-        text = text.replace(sep, '|')
-    parts = text.split('|')
+    # Primary method: Look for "word(s) is number" patterns
+    # This regex captures: optional words + "is" + number
+    pattern = r'([a-zA-Z\s]+?)\s+is\s+([-+]?\d*\.?\d+)'
+    matches = re.findall(pattern, text)
     
-    # Process each part
     results = []
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
+    
+    if matches:
+        for param_text, value_text in matches:
+            # Clean parameter name
+            param_text = param_text.strip()
             
-        # Extract numeric value
-        numbers = re.findall(r"[-+]?\d*\.\d+|\d+", part)
-        if not numbers:
-            continue
+            # Remove any trailing words that might have been caught
+            param_words = param_text.split()
+            # Keep only the actual parameter words (remove conjunctions, etc.)
+            cleaned_words = []
+            for word in param_words:
+                if word not in ['and', 'the', 'a', 'an', 'or', 'but']:
+                    cleaned_words.append(word)
             
-        value = float(numbers[0])
+            if cleaned_words:
+                parameter = ' '.join(word.capitalize() for word in cleaned_words)
+                try:
+                    value = float(value_text)
+                    results.append((parameter, value))
+                except ValueError:
+                    continue
+    
+    # Fallback: Try comma/and separation if no "is" patterns found
+    if not results:
+        # Split by common separators
+        for separator in [' and ', ', ', ';', ' & ']:
+            text = text.replace(separator, '|')
         
-        # Extract parameter name
-        # Remove common words and clean up
-        words_to_remove = ['is', 'are', 'was', 'were', 'equals', 'equal', 'to', 'at']
-        parameter = part
-        for word in words_to_remove:
-            parameter = parameter.replace(word, '')
+        parts = [p.strip() for p in text.split('|') if p.strip()]
         
-        # Get everything before the number
-        parameter = parameter.split(str(numbers[0]))[0].strip()
-        
-        # Capitalize first letter of each word
-        parameter = ' '.join(word.capitalize() for word in parameter.split())
-        
-        if parameter:  # Only add if we found a parameter name
-            results.append((parameter, value))
+        for part in parts:
+            # Look for numbers in each part
+            numbers = re.findall(r'[-+]?\d*\.?\d+', part)
+            if numbers:
+                value = float(numbers[0])
+                
+                # Get parameter name (everything before the number)
+                param_part = part.split(numbers[0])[0]
+                param_part = re.sub(r'\b(is|are|was|were|equals?|the|a|an)\b', '', param_part)
+                param_part = param_part.strip()
+                
+                if param_part:
+                    parameter = ' '.join(word.capitalize() for word in param_part.split())
+                    results.append((parameter, value))
     
     return results
 
@@ -650,78 +665,149 @@ if not st.session_state.get('logged_in_user'):
 st.title("Bina Refinery Operations Logbook")
 st.write(f"Welcome to {assigned_area} Operations Logbook")
 
+# Add instructions for multiple parameters
+st.info("""
+🎤 **Voice Input Guide for Multiple Parameters:**
+- Say multiple parameters in one sentence
+- Examples: 
+  - "Temperature is 120, Current is 200, Pressure is 2.5"
+  - "Temp 120 and current 200 and pressure 2.5" 
+  - "Temperature 120, voltage 240, flow rate 50"
+""")
+
 # Display equipment cards
 st.subheader("Equipment Readings")
 cols = st.columns(min(3, num_equipment))  # Show max 3 columns
 
 for i in range(num_equipment):
     with cols[i % 3]:
+        equipment_name = f"Equipment {i+1}"
+        
         st.markdown(f"""
         <div style='background-color: #1f2937; padding: 20px; border-radius: 10px; margin-bottom: 20px;'>
-            <h3 style='color: #60a5fa;'>Equipment {i+1}</h3>
+            <h3 style='color: #60a5fa;'>{equipment_name}</h3>
         </div>
         """, unsafe_allow_html=True)
         
         # Create a form for each equipment
         with st.form(key=f"equipment_{i+1}"):
             # Form submit button for voice input
-            if st.form_submit_button("🎤 Start Voice Input"):
-                with st.spinner("🎤 Listening..."):
+            if st.form_submit_button("🎤 Record Multiple Parameters"):
+                with st.spinner("🎤 Listening for multiple parameters..."):
                     voice_input = get_voice_input()
                     if voice_input:
-                        st.write(f"🎯 Voice Input: {voice_input}")
+                        st.write(f"🎯 **Voice Input:** {voice_input}")
                         parameter_value_pairs = extract_parameter_value_pairs(voice_input)
                         
                         if parameter_value_pairs:
                             # Add to session state
-                            if f"Equipment {i+1}" not in st.session_state.readings:
-                                st.session_state.readings[f"Equipment {i+1}"] = []
+                            if equipment_name not in st.session_state.readings:
+                                st.session_state.readings[equipment_name] = []
+                            
+                            # Display what was found
+                            st.write(f"📊 **Found {len(parameter_value_pairs)} parameters:**")
                             
                             # Process each parameter-value pair
                             for parameter, value in parameter_value_pairs:
-                                st.session_state.readings[f"Equipment {i+1}"].append({
+                                # Add to session state
+                                st.session_state.readings[equipment_name].append({
                                     'parameter': parameter,
                                     'value': value,
                                     'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 })
                                 
                                 # Append to Excel
-                                append_to_excel(f"Equipment {i+1}", parameter, value)
-                                st.success(f"✅ Successfully logged: {parameter} = {value}")
+                                append_to_excel(equipment_name, parameter, value)
+                                
+                                # Show individual success
+                                st.success(f"✅ {parameter}: {value}")
+                            
+                            st.balloons()  # Celebration for multiple successful entries
                         else:
                             st.error("❌ Could not extract any parameter-value pairs from the voice input")
-                            st.info("💡 Try speaking clearly, for example: 'Temperature is 120, Current is 200, Pressure is 2.5'")
+                            st.info("💡 Try speaking clearly with examples like: 'Temperature is 120, Current is 200, Pressure is 2.5'")
 
-# Display current readings
-st.subheader("Current Readings")
+        # Display current readings for this equipment (outside the form)
+        if equipment_name in st.session_state.readings and st.session_state.readings[equipment_name]:
+            st.markdown("**📋 Current Readings:**")
+            
+            # Group by parameter for better display
+            latest_readings = {}
+            for reading in st.session_state.readings[equipment_name]:
+                param = reading['parameter']
+                if param not in latest_readings or reading['timestamp'] > latest_readings[param]['timestamp']:
+                    latest_readings[param] = reading
+            
+            # Display as metrics
+            for param, reading in latest_readings.items():
+                col1, col2 = st.columns([2, 1])
+                with col1:
+                    st.metric(param, f"{reading['value']}")
+                with col2:
+                    st.caption(f"⏰ {reading['timestamp'].split(' ')[1]}")
+
+# Display all current readings in expandable sections
+st.subheader("📊 All Current Readings")
 for equipment, readings in st.session_state.readings.items():
-    with st.expander(f"{equipment} Readings"):
-        for reading in readings:
-            st.write(f"Parameter: {reading['parameter']}")
-            st.write(f"Value: {reading['value']}")
-            st.write(f"Time: {reading['timestamp']}")
-            st.markdown("---")
+    if readings:  # Only show if there are readings
+        with st.expander(f"{equipment} - {len(readings)} total readings"):
+            # Create a DataFrame for better display
+            readings_df = pd.DataFrame(readings)
+            if not readings_df.empty:
+                st.dataframe(readings_df, use_container_width=True)
 
-# Export button
-if st.button("📥 Export Readings as Excel"):
-    try:
-        df_export = pd.read_excel('bina_refinery_log.xlsx')
-        if not df_export.empty:
-            csv = df_export.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="⬇️ Download Excel",
-                data=csv,
-                file_name="readings.csv",
-                mime="text/csv",
-                key="download_csv"
-            )
+# Summary metrics
+st.subheader("📈 Summary")
+col1, col2, col3 = st.columns(3)
+
+total_readings = sum(len(readings) for readings in st.session_state.readings.values())
+total_equipment_with_readings = len([eq for eq, readings in st.session_state.readings.items() if readings])
+
+with col1:
+    st.metric("Total Readings", total_readings)
+with col2:
+    st.metric("Equipment with Data", f"{total_equipment_with_readings}/{num_equipment}")
+with col3:
+    if total_readings > 0:
+        avg_per_equipment = total_readings / max(total_equipment_with_readings, 1)
+        st.metric("Avg Readings/Equipment", f"{avg_per_equipment:.1f}")
+
+# Export and management buttons
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("📥 Export Readings as Excel"):
+        try:
+            df_export = pd.read_excel('bina_refinery_log.xlsx')
+            if not df_export.empty:
+                csv = df_export.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="⬇️ Download CSV",
+                    data=csv,
+                    file_name=f"bina_refinery_readings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    key="download_csv"
+                )
+            else:
+                st.warning("No readings to export.")
+        except Exception as e:
+            st.error(f"An error occurred during export: {e}")
+
+with col2:
+    if st.button("🗑️ Clear All Readings"):
+        st.session_state.readings = {}
+        st.success("All readings cleared!")
+        st.rerun()
+
+with col3:
+    if st.button("↩️ Remove Last Entry"):
+        if remove_last_entry_from_excel():
+            st.success("Last entry removed from Excel!")
+            # Also remove from session state
+            for equipment in st.session_state.readings:
+                if st.session_state.readings[equipment]:
+                    st.session_state.readings[equipment].pop()
+                    break
+            st.rerun()
         else:
-            st.warning("No readings to export.")
-    except Exception as e:
-        st.error(f"An error occurred during export: {e}")
-
-# Clear readings button
-if st.button("🗑️ Clear All Readings"):
-    st.session_state.readings = {}
-    st.success("All readings cleared!")
-    st.rerun() 
+            st.warning("No entries to remove!")
