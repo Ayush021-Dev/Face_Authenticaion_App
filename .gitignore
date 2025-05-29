@@ -37,4 +37,15 @@ models/
 data/
 *.log
 bina_refinery.csv
-bina_refinery_log.xlsx 
+bina_refinery_log.xlsx
+
+# Face Recognition specific
+face_utils/videos/
+face_utils/models/
+*.h5
+*.pkl
+*.npy
+*.jpg
+*.jpeg
+*.png
+training_data/ 
