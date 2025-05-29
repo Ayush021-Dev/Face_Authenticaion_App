@@ -12,7 +12,7 @@ import os
 from database.db_manager import DatabaseManager
 from face_utils.detector import FaceDetector
 from face_utils.recognizer import FaceRecognizer
-from face_utils.anti_spoof import AntiSpoofing
+from face_utils.liveness_model import LivenessDetector
 from utils.location import get_location, is_within_area
 
 # Set page configuration
@@ -33,7 +33,7 @@ def load_resources():
     db_manager = DatabaseManager()
     face_detector = FaceDetector()
     face_recognizer = FaceRecognizer()
-    anti_spoof = AntiSpoofing()
+    liveness_detector = LivenessDetector()
     
     # Create default admin if no admins exist
     try:
@@ -41,9 +41,9 @@ def load_resources():
     except:
         pass  # Admin might already exist
     
-    return db_manager, face_detector, face_recognizer, anti_spoof
+    return db_manager, face_detector, face_recognizer, liveness_detector
 
-db_manager, face_detector, face_recognizer, anti_spoof = load_resources()
+db_manager, face_detector, face_recognizer, liveness_detector = load_resources()
 
 # Load existing employees
 employees = db_manager.get_all_employees()
@@ -312,7 +312,7 @@ elif option == "Sign Up":
                             face_location = face_detector.convert_rect_format(x, y, w, h)
                             
                             # Check for spoofing
-                            is_real = anti_spoof.check_liveness(frame, face_location)
+                            is_real = liveness_detector.check_liveness(frame, face_location)
                             
                             if is_real:
                                 # Extract face region
@@ -480,7 +480,7 @@ elif option == "Login":
                     face_location = face_detector.convert_rect_format(x, y, w, h)
                     
                     # Check for spoofing
-                    is_real = anti_spoof.check_liveness(frame, face_location)
+                    is_real = liveness_detector.check_liveness(frame, face_location)
                     
                     if is_real:
                         # Extract face region
