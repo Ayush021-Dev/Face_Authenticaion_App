@@ -19,6 +19,12 @@ class AntiSpoofing:
         self.eye_aspect_ratios = []
         self.blink_detected = False
         
+        # For video playback detection
+        self.frame_history = []
+        self.max_history = 10
+        self.last_face_encoding = None
+        self.face_encoding_history = []
+        
         # Download and load model if not already present
         self.model_loaded = self._load_or_download_model()
         
@@ -82,31 +88,42 @@ class AntiSpoofing:
             
             if face_region.size == 0:
                 return False
-                
-            # 1. Texture analysis (30%)
+            
+            # Store frame for temporal analysis
+            self.frame_history.append(frame.copy())
+            if len(self.frame_history) > self.max_history:
+                self.frame_history.pop(0)
+            
+            # 1. Texture analysis (35%)
             texture_score = self._analyze_texture(face_region)
             
-            # 2. Motion analysis (30%)
+            # 2. Motion analysis (35%)
             motion_score = self._analyze_motion(frame)
             
-            # 3. Eye detection and analysis (40%)
+            # 3. Eye detection and analysis (20%)
             eye_score = self._analyze_eyes(face_region)
             
+            # 4. Video playback detection (10%)
+            video_score = self._detect_video_playback(face_region)
+            
             # Combine scores with weighting
-            combined_score = (0.3 * texture_score + 0.3 * motion_score + 0.4 * eye_score)
+            combined_score = (0.35 * texture_score + 
+                            0.35 * motion_score + 
+                            0.20 * eye_score + 
+                            0.10 * video_score)
             
             # Log detailed results for debugging
-            print(f"Anti-spoofing scores - Texture: {texture_score:.2f}, Motion: {motion_score:.2f}, Eyes: {eye_score:.2f}")
+            print(f"Anti-spoofing scores - Texture: {texture_score:.2f}, Motion: {motion_score:.2f}, "
+                  f"Eyes: {eye_score:.2f}, Video: {video_score:.2f}")
             print(f"Combined liveness score: {combined_score:.2f}")
             
-            # Decision threshold (adjust as needed based on testing)
-            is_real = combined_score > 0.65
+            # Increased threshold for better security
+            is_real = combined_score > 0.75
             
             return is_real
             
         except Exception as e:
             print(f"Error in advanced liveness detection: {e}")
-            # Default to False (reject) in case of errors
             return False
     
     def _analyze_texture(self, face_region):
@@ -123,21 +140,20 @@ class AntiSpoofing:
             # Convert to grayscale
             gray_face = cv2.cvtColor(face_resized, cv2.COLOR_BGR2GRAY)
             
-            # 1. Gradient analysis
+            # 1. Enhanced gradient analysis
             gradient_x = cv2.Sobel(gray_face, cv2.CV_64F, 1, 0, ksize=3)
             gradient_y = cv2.Sobel(gray_face, cv2.CV_64F, 0, 1, ksize=3)
             
             gradient_magnitude = np.sqrt(gradient_x**2 + gradient_y**2)
             gradient_variance = np.var(gradient_magnitude)
             
-            # 2. Frequency analysis using FFT
+            # 2. Enhanced frequency analysis using FFT
             f_transform = np.fft.fft2(gray_face)
             f_shift = np.fft.fftshift(f_transform)
             magnitude_spectrum = 20 * np.log(np.abs(f_shift) + 1)
             
-            # Calculate high-frequency content (printed images often lack this)
-            # Get the center region (low frequencies)
-            center_size = 20
+            # Calculate high-frequency content
+            center_size = 15  # Reduced center size for better high-frequency detection
             height, width = magnitude_spectrum.shape
             center_y, center_x = height // 2, width // 2
             
@@ -150,17 +166,22 @@ class AntiSpoofing:
             total_energy = np.sum(magnitude_spectrum)
             high_freq_ratio = high_freq_energy / total_energy if total_energy > 0 else 0
             
-            # Combine metrics - normalize and scale for 0-1 range
+            # 3. Add color variation analysis
+            color_variance = np.var(face_resized, axis=(0, 1))
+            color_score = min(1.0, np.mean(color_variance) / 1000)
+            
+            # Combine metrics with adjusted weights
             texture_score = min(1.0, max(0.0, 
-                0.6 * min(1.0, gradient_variance / 1000) + 
-                0.4 * min(1.0, high_freq_ratio * 10)
+                0.4 * min(1.0, gradient_variance / 800) +  # Reduced threshold
+                0.4 * min(1.0, high_freq_ratio * 15) +    # Increased multiplier
+                0.2 * color_score                         # Added color analysis
             ))
             
             return texture_score
             
         except Exception as e:
             print(f"Error in texture analysis: {e}")
-            return 0.5  # Default to middle value in case of error
+            return 0.3  # More conservative default value
     
     def _analyze_motion(self, frame):
         """
@@ -177,15 +198,15 @@ class AntiSpoofing:
             # Initialize on first call
             if self.prev_frame is None:
                 self.prev_frame = gray_frame
-                return 0.5  # Default middle value
+                return 0.3  # More conservative default
             
-            # Check if we should compute motion (every 300ms)
+            # Check if we should compute motion (every 200ms - increased frequency)
             current_time = time.time()
-            if current_time - self.last_motion_check < 0.3:
+            if current_time - self.last_motion_check < 0.2:
                 # Return last result if we have one
                 if len(self.motion_history) > 0:
                     return self.motion_history[-1]
-                return 0.5
+                return 0.3
             
             # Update timing
             self.last_motion_check = current_time
@@ -199,39 +220,33 @@ class AntiSpoofing:
             # Calculate motion metrics
             motion_amount = np.mean(frame_diff)
             
-            # Store in history (keep last 5 values)
+            # Store in history (keep last 5 measurements)
             self.motion_history.append(motion_amount)
             if len(self.motion_history) > 5:
                 self.motion_history.pop(0)
             
-            # Analyze motion pattern
-            avg_motion = np.mean(self.motion_history)
+            # Calculate motion score based on variance and amount
             motion_variance = np.var(self.motion_history) if len(self.motion_history) > 1 else 0
             
-            # Score calculation:
-            # - Low motion (<0.5): Likely a photo (low score)
-            # - Very high motion (>15): Possible video playback (medium score)
-            # - Moderate motion with some variance: Likely a real person (high score)
-            
-            if avg_motion < 0.5:
-                base_score = avg_motion * 0.8  # Low score for very little motion
-            elif avg_motion > 15:
-                base_score = 0.7 - min(0.2, (avg_motion - 15) / 50)  # Penalize very high motion
+            # Check for unnatural motion patterns
+            if len(self.motion_history) >= 3:
+                # Video playback often shows very regular motion
+                motion_regularity = np.std(np.diff(self.motion_history))
+                regularity_penalty = min(1.0, motion_regularity * 50)
             else:
-                # Sweet spot: moderate motion gets high score
-                base_score = 0.7 + min(0.3, (avg_motion - 0.5) / 15)
+                regularity_penalty = 0.0
             
-            # Add bonus for natural motion variance (real faces have micro-movements)
-            variance_bonus = min(0.2, motion_variance / 5)
-            
-            # Final motion score
-            motion_score = min(1.0, max(0.0, base_score + variance_bonus))
+            motion_score = min(1.0, max(0.0,
+                0.6 * min(1.0, motion_amount / 10) +  # Basic motion amount
+                0.3 * min(1.0, motion_variance * 100) +  # Motion variance
+                0.1 * (1.0 - regularity_penalty)  # Penalty for too regular motion
+            ))
             
             return motion_score
             
         except Exception as e:
             print(f"Error in motion analysis: {e}")
-            return 0.5  # Default to middle value in case of error
+            return 0.3  # More conservative default
     
     def _analyze_eyes(self, face_region):
         """
@@ -293,6 +308,80 @@ class AntiSpoofing:
         except Exception as e:
             print(f"Error in eye analysis: {e}")
             return 0.3  # Default to low-medium value in case of error
+    
+    def _detect_video_playback(self, face_region):
+        """
+        Detect video playback by analyzing temporal consistency
+        
+        Returns:
+            Score between 0.0 (video) and 1.0 (real)
+        """
+        try:
+            if len(self.frame_history) < 3:
+                return 0.5  # Not enough history yet
+            
+            # 1. Check for temporal consistency
+            consistency_score = 0.0
+            if len(self.frame_history) >= 3:
+                # Compare consecutive frames
+                frame_diffs = []
+                for i in range(1, len(self.frame_history)):
+                    prev = cv2.cvtColor(self.frame_history[i-1], cv2.COLOR_BGR2GRAY)
+                    curr = cv2.cvtColor(self.frame_history[i], cv2.COLOR_BGR2GRAY)
+                    diff = cv2.absdiff(prev, curr)
+                    frame_diffs.append(np.mean(diff))
+                
+                # Video playback often shows very consistent frame differences
+                frame_diff_variance = np.var(frame_diffs)
+                consistency_score = min(1.0, frame_diff_variance * 100)
+            
+            # 2. Check for unnatural motion patterns
+            motion_pattern_score = 0.0
+            if len(self.motion_history) >= 3:
+                # Video playback often shows very regular motion patterns
+                motion_variance = np.var(self.motion_history)
+                motion_pattern_score = min(1.0, motion_variance * 50)
+            
+            # 3. Check for compression artifacts
+            compression_score = 0.0
+            if face_region.size > 0:
+                # Convert to YCrCb color space
+                ycrcb = cv2.cvtColor(face_region, cv2.COLOR_BGR2YCrCb)
+                # Check for block artifacts in Cr and Cb channels
+                cr_blocks = self._detect_compression_blocks(ycrcb[:,:,1])
+                cb_blocks = self._detect_compression_blocks(ycrcb[:,:,2])
+                compression_score = 1.0 - min(1.0, (cr_blocks + cb_blocks) / 2)
+            
+            # Combine scores
+            video_score = (0.4 * consistency_score + 
+                         0.4 * motion_pattern_score + 
+                         0.2 * compression_score)
+            
+            return video_score
+            
+        except Exception as e:
+            print(f"Error in video playback detection: {e}")
+            return 0.3  # Conservative default
+
+    def _detect_compression_blocks(self, channel):
+        """
+        Detect compression artifacts in a color channel
+        
+        Returns:
+            Score between 0.0 (no artifacts) and 1.0 (heavy artifacts)
+        """
+        try:
+            # Apply DCT to detect block artifacts
+            dct = cv2.dct(np.float32(channel))
+            dct_abs = np.abs(dct)
+            
+            # Check for block patterns in high frequencies
+            block_score = np.mean(dct_abs[8:, 8:]) / np.mean(dct_abs)
+            
+            return min(1.0, block_score * 10)
+        except Exception as e:
+            print(f"Error in compression detection: {e}")
+            return 0.0
     
     def draw_result(self, frame, face_location, is_real):
         """

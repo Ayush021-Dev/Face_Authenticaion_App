@@ -22,7 +22,7 @@ tracemalloc.start()
 from database.db_manager import DatabaseManager
 from face_utils.detector import FaceDetector
 from face_utils.recognizer import FaceRecognizer
-from face_utils.anti_spoof import AntiSpoofing
+from face_utils.liveness_model import LivenessDetector
 from utils.location import get_location, is_within_area
 
 # Set page configuration
@@ -43,7 +43,7 @@ def load_resources():
     db_manager = DatabaseManager()  # This will now use SQLite
     face_detector = FaceDetector()
     face_recognizer = FaceRecognizer()
-    anti_spoof = AntiSpoofing()
+    liveness_detector = LivenessDetector()
     
     # Create default admin if no admins exist
     try:
@@ -51,9 +51,9 @@ def load_resources():
     except:
         pass  # Admin might already exist
     
-    return db_manager, face_detector, face_recognizer, anti_spoof
+    return db_manager, face_detector, face_recognizer, liveness_detector
 
-db_manager, face_detector, face_recognizer, anti_spoof = load_resources()
+db_manager, face_detector, face_recognizer, liveness_detector = load_resources()
 
 # Load existing employees
 employees = db_manager.get_all_employees()
@@ -337,88 +337,46 @@ elif option == "Sign Up":
                     
                     while not face_captured and capture_attempts < max_attempts:
                         ret, frame = cap.read()
-                        if ret:
-                            # Detect faces
-                            face_locations = face_detector.detect_face_dnn(frame)
+                        if not ret:
+                            st.error("Could not access camera")
+                            break
                             
-                            if face_locations:
-                                # Find the largest face
-                                largest_face = None
-                                largest_area = 0
-                                for (x, y, w, h) in face_locations:
-                                    area = w * h
-                                    if area > largest_area:
-                                        largest_area = area
-                                        largest_face = (x, y, w, h)
-
-                                if largest_face is not None:
-                                    # Add a minimum size check for the detected face
-                                    min_face_area = 5000 # Example threshold, adjust as needed
-                                    if largest_area > min_face_area:
-                                        left, top, width, height = largest_face
-                                        right = left + width
-                                        bottom = top + height
-
-                                        # Get coordinates from the largest face bounding box
-                                        # Ensure coordinates are within image bounds before cropping
-                                        h_frame, w_frame = frame.shape[:2]
-                                        top_bounded = max(0, top)
-                                        left_bounded = max(0, left)
-                                        bottom_bounded = min(h_frame, bottom)
-                                        right_bounded = min(w_frame, right)
-
-                                        # Crop face
-                                        face_img = frame[top_bounded:bottom_bounded, left_bounded:right_bounded]
-
-                                        # Only proceed if the cropped image is valid
-                                        if face_img.size != 0:
-                                            # Get face encoding from the largest face
-                                            face_encoding = face_recognizer.get_face_encoding(face_img)
-
-                                            # Check if face encoding is valid before recognition
-                                            if face_encoding is not None:
-                                                # Check if face already exists
-                                                exists, existing_id, existing_name = db_manager.face_exists(face_encoding)
-                                                
-                                                if exists:
-                                                    st.error(f"Face already registered for {existing_name} (ID: {existing_id})")
-                                                    cap.release()
-                                                    break
-                                                
-                                                # Serialize face encoding
-                                                face_encoding_blob = pickle.dumps(face_encoding)
-                                                
-                                                # Register employee
-                                                if db_manager.register_employee(emp_id, emp_name, face_encoding_blob, selected_area):
-                                                    st.success(f"✅ Employee {emp_name} registered successfully!")
-                                                    
-                                                    # Update face recognizer with new employee
-                                                    employees = db_manager.get_all_employees()
-                                                    face_recognizer.load_from_database(employees)
-                                                    
-                                                    face_captured = True
-                                                    cap.release()
-                                                    st.rerun()
-                                                else:
-                                                    st.error("Failed to register employee. Please try again.")
-                                                    cap.release()
-                                                    break
+                        # Display the frame in the second column
+                        with col2:
+                            st.image(frame, channels="BGR", caption="Camera Feed", use_column_width=True)
+                        
+                        # Find faces using DNN
+                        faces = face_detector.detect_face_dnn(frame)
+                        
+                        if faces:
+                            # Check for multiple faces
+                            if len(faces) > 1:
+                                status_text.text("⚠️ Multiple faces detected! Please ensure only one face is in frame.")
+                                time.sleep(1)
+                                continue
+                                
+                            # Get the first face
+                            x, y, w, h = faces[0]
+                            face_location = face_detector.convert_rect_format(x, y, w, h)
                             
-                            # Display frame with face detection
-                            display_frame = frame.copy()
-                            for face_location in face_locations:
-                                top, right, bottom, left = face_location
-                                cv2.rectangle(display_frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                            # Check for spoofing
+                            is_real = anti_spoof.check_liveness(frame, face_location)
                             
-                            # Convert BGR to RGB for Streamlit
-                            display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-                            camera_placeholder.image(display_frame, channels="RGB", use_column_width=True)
-                            
-                            capture_attempts += 1
-                            time.sleep(0.1)
-                    
-                    if not face_captured and capture_attempts >= max_attempts:
-                        st.error("Could not detect face clearly. Please try again with better lighting and positioning.")
+                            if is_real:
+                                # Extract face region
+                                face_img = frame[y:y+h, x:x+w]
+                                
+                                # Get encoding
+                                encoding = face_recognizer.get_face_encoding(face_img)
+                                face_encodings.append(encoding)
+                                frames_with_face += 1
+                                progress.progress(0.5 + frames_with_face * 0.05)
+                                status_text.text(f"Captured frame {frames_with_face}/{max_frames}")
+                            else:
+                                status_text.text("⚠️ Spoof detected! Please use a real face.")
+                                time.sleep(1)
+                        
+                        time.sleep(0.2)
                     
                     cap.release()
     
@@ -500,107 +458,51 @@ elif option == "Login":
             
             while st.session_state.get('auth_in_progress', False) and auth_attempts < max_auth_attempts and not authenticated:
                 ret, frame = cap.read()
-                if ret:
-                    # Detect faces
-                    face_locations = face_detector.detect_face_dnn(frame)
+                if not ret:
+                
+                    st.error("Could not access camera")
+                    break
+                
+                # Find faces using DNN
+                faces = face_detector.detect_face_dnn(frame)
+                
+                # Display the frame in the second column
+                with col2:
+                    if faces:
+                        # Check for multiple faces
+                        if len(faces) > 1:
+                            status_text.text("⚠️ Multiple faces detected! Please ensure only one face is in frame.")
+                            time.sleep(1)
+                            continue
+                            
+                        # Draw rectangle around face
+                        for (x, y, w, h) in faces:
+                            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    st.image(frame, channels="BGR", caption="Camera Feed", use_column_width=True)
+                
+                if faces:
+                    # Get the first face
+                    x, y, w, h = faces[0]
+                    face_location = face_detector.convert_rect_format(x, y, w, h)
                     
-                    if face_locations:
-                        auth_status_placeholder.info("👤 Face detected! Verifying identity...")
-
-                        # Find the largest face
-                        largest_face = None
-                        largest_area = 0
-                        for (x, y, w, h) in face_locations:
-                            area = w * h
-                            if area > largest_area:
-                                largest_area = area
-                                largest_face = (x, y, w, h)
-
-                        if largest_face is not None:
-                            # Add a minimum size check for the detected face
-                            min_face_area = 5000 # Example threshold, adjust as needed
-                            if largest_area > min_face_area:
-                                left, top, width, height = largest_face
-                                right = left + width
-                                bottom = top + height
-
-                                # Get coordinates from the largest face bounding box
-                                # Ensure coordinates are within image bounds before cropping
-                                h_frame, w_frame = frame.shape[:2]
-                                top_bounded = max(0, top)
-                                left_bounded = max(0, left)
-                                bottom_bounded = min(h_frame, bottom)
-                                right_bounded = min(w_frame, right)
-
-                                # Crop face
-                                face_img = frame[top_bounded:bottom_bounded, left_bounded:right_bounded]
-
-                                # Only proceed if the cropped image is valid
-                                if face_img.size != 0:
-                                    # Get face encoding from the largest face
-                                    face_encoding = face_recognizer.get_face_encoding(face_img)
-
-                                    # Check if face encoding is valid before recognition
-                                    if face_encoding is not None:
-                                        # Recognize face
-                                        try:
-                                            employee_id, min_distance = face_recognizer.recognize_face(face_encoding)
-
-                                            if employee_id and min_distance is not None and min_distance < 0.6:  # Use distance and tolerance for recognition check
-                                                # Anti-spoofing check
-                                                is_real = anti_spoof.detect_real_face(frame, face_locations[0])
-                                                
-                                                if is_real:
-                                                    # Get employee details including area assignment
-                                                    employee_details = db_manager.get_employee(employee_id)
-                                                    
-                                                    if employee_details:
-                                                        # Check location if employee has area assignment
-                                                        if employee_details['equipment_name'] and employee_details['area_lat'] and employee_details['area_lon']:
-                                                            if current_lat and current_lon:
-                                                                within_area = is_within_area(
-                                                                    current_lat, current_lon,
-                                                                    employee_details['area_lat'], employee_details['area_lon'],
-                                                                    employee_details['area_radius']
-                                                                )
-                                                                
-                                                                if not within_area:
-                                                                    auth_status_placeholder.warning(f"⚠️ You are not within the allowed area for {employee_details['equipment_name']}")
-                                                                    time.sleep(3)
-                                                                    continue
-                                                            else:
-                                                                auth_status_placeholder.warning("⚠️ Could not determine your location. Please enable location services.")
-                                                                time.sleep(3)
-                                                                continue
-                                                        
-                                                        # Log successful login
-                                                        db_manager.log_login(employee_id, current_lat, current_lon)
-                                                        
-                                                        # Set session state for successful login
-                                                        st.session_state.logged_in_user = employee_id
-                                                        st.session_state.user_name = employee_details['employee_name']
-                                                        st.session_state.user_info = employee_details
-                                                        st.session_state.login_time = datetime.now()
-                                                        st.session_state.auth_in_progress = False
-                                                        
-                                                        # Success message
-                                                        auth_status_placeholder.success(f"✅ Welcome {employee_details['employee_name']}! Authentication successful!")
-                                                        
-                                                        # Set redirect flag
-                                                        st.session_state.redirect_to_logbook = True
-                                                        
-                                                        authenticated = True
-                                                        cap.release()
-                                                        
-                                                        # Brief pause before redirect
-                                                        time.sleep(2)
-                                                        st.rerun()
-                                                    else:
-                                                        auth_status_placeholder.warning("⚠️ Possible spoofing attempt detected! Use your real face.")
-                                                else:
-                                                    auth_status_placeholder.warning("👤 Face not recognized. Please try again.")
-                                        except Exception:
-                                            st.warning("Could not process face recognition result.")
+                    # Check for spoofing
+                    is_real = anti_spoof.check_liveness(frame, face_location)
+                    
+                    if is_real:
+                        # Extract face region
+                        face_img = frame[y:y+h, x:x+w]
+                        
+                        # Get encoding
+                        encoding = face_recognizer.get_face_encoding(face_img)
+                        
+                        # Try to recognize
+                        recognized_emp_id = face_recognizer.recognize_face(encoding)
+                        if recognized_emp_id:
+                            login_successful = True
+                            status_text.text("Face verified!")
+                            break
+                        else:
+                            status_text.text("Face not recognized")
                     else:
                         auth_status_placeholder.info("📷 Looking for face... Please position yourself in front of the camera.")
                     
