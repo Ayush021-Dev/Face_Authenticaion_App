@@ -47,6 +47,9 @@ class FaceRecognizer:
             # Return random encoding if model not available (for testing)
             return np.random.rand(128).astype(np.float32)
         
+        if face_img.size == 0:
+            return None
+        
         # Resize and preprocess face
         face_blob = cv2.dnn.blobFromImage(
             face_img, 1.0/255, (96, 96), (0, 0, 0), swapRB=True, crop=False
@@ -93,11 +96,11 @@ class FaceRecognizer:
         min_distance_idx = np.argmin(distances)
         min_distance = distances[min_distance_idx]
         
-        # If distance is less than tolerance, return the employee ID
+        # If distance is less than tolerance, return the employee ID and the distance
         if min_distance < tolerance:
-            return self.known_face_ids[min_distance_idx]
+            return self.known_face_ids[min_distance_idx], min_distance
         
-        return None
+        return None, None
     
     def load_from_database(self, employees):
         """
@@ -109,10 +112,12 @@ class FaceRecognizer:
         self.known_face_encodings = []
         self.known_face_ids = []
         
-        for emp_id, name, face_encoding in employees:
+        for emp_id, name, face_encoding_blob, equipment_area in employees:
             # Decode the face encoding from bytes to numpy array
             try:
-                decoded_encoding = pickle.loads(face_encoding)
+                decoded_encoding = pickle.loads(face_encoding_blob)
                 self.add_face(decoded_encoding, emp_id)
+            except pickle.UnpicklingError:
+                print(f"Warning: Could not decode face encoding for employee ID {emp_id}. Data might be corrupted or not pickled correctly.")
             except Exception as e:
-                print(f"Error loading encoding for {emp_id}: {e}")
+                print(f"Warning: Unexpected error loading encoding for employee ID {emp_id}: {e}")

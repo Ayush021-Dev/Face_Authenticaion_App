@@ -1,19 +1,18 @@
 # Face Authentication System
 
-A secure face authentication system built with Python, OpenCV, and MySQL.
+A secure face authentication system built with Python, OpenCV, and SQLite.
 
 ## Features
 
 - Face detection and recognition
 - Anti-spoofing protection
 - Location-based authentication
-- MySQL database integration
+- SQLite database integration (offline)
 - Streamlit web interface
 
 ## Prerequisites
 
 - Python 3.8+
-- MySQL Server
 - Webcam
 
 ## Installation
@@ -21,7 +20,7 @@ A secure face authentication system built with Python, OpenCV, and MySQL.
 1. Clone the repository:
 ```bash
 git clone https://github.com/Ayush021-Dev/Face_Authenticaion_App.git
-cd face_auth_system
+cd Face_Authenticaion_App
 ```
 
 2. Install dependencies:
@@ -29,13 +28,7 @@ cd face_auth_system
 pip install -r requirements.txt
 ```
 
-3. Set up MySQL database:
-```sql
-CREATE DATABASE"NAME";
-CREATE USER 'faceuser'@'localhost' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON NAME.* TO 'faceuser'@'localhost';
-FLUSH PRIVILEGES;
-```
+3. The SQLite database file (`face_auth.db`) will be automatically created when you run the application for the first time.
 
 ## Usage
 
@@ -49,11 +42,11 @@ streamlit run app.py
 ## Project Structure
 
 ```
-face_auth_system/
+Face_Authenticaion_App/
 ├── app.py                  # Main Streamlit application
 ├── database/
 │   ├── __init__.py
-│   └── db_manager.py       # MySQL database operations
+│   └── db_manager.py       # SQLite database operations
 ├── face_utils/
 │   ├── __init__.py
 │   ├── detector.py         # Face detection
